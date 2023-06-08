@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""
+Script to wprogram for repetitive network scans that will display differences between scans.
+"""
+import nmap
+import json
+import sys
+import ipaddress
+
+filename = '/app/data/data.json'
+
+# Function performs network scan
+# arguments part can be modified with different nmap flags
+# Currently scans port btw 22 and 1023 for sake of simplicity and time
+def perform_network_scan(network):
+    nm = nmap.PortScanner()
+    scan_results = nm.scan(network, arguments='-p 22-1023')
+#    print(scan_results)
+    return scan_results
+
+#Function performs network scan using function "perform_network_scan"
+# and parses/transforms the scan result as required in output as dictionary
+def ip_port_info(network):
+    scan_results = perform_network_scan(network)
+
+    ip_ports_dict = {}
+
+    for ip in scan_results['scan'].keys():
+        if 'tcp' in scan_results['scan'][ip]:
+            ip_ports_dict[ip] = list(scan_results['scan'][ip]['tcp'].keys())
+            ip_ports_dict[ip] = [str(port) + "/tcp" for port in ip_ports_dict[ip]]
+        elif 'udp' in scan_results['scan'][ip]:
+            ip_ports_dict[ip] = list(scan_results['scan'][ip]['udp'].keys())
+            ip_ports_dict[ip] = [str(port) + "/udp" for port in ip_ports_dict[ip]]
+        else:
+            pass
+        
+    return ip_ports_dict
+
+#Function compares the previous result and current result and print the diff
+def compare_results(current_result):
+    # Load previous scan data
+    try:
+        with open(filename, 'r') as file:
+            previous_result = json.load(file)
+    except FileNotFoundError:
+        previous_result = {}
+    # Compares current and previous scan datas
+    if current_result == previous_result:
+        print("No change")
+    else:
+        C = set(current_result)
+        P = set(previous_result)
+        
+        # New hosts
+        add_ip = C.difference(P)
+        if add_ip:
+            for ip in add_ip:
+                print(f"+ {ip}")
+                for port in current_result[ip]:
+                    print(f"* {port} open")
+        # Removed hosts
+        rmv_ip = P.difference(C)
+        if rmv_ip: 
+            for ip in rmv_ip:
+                print(f"- {ip}")
+        # Existing host with different port
+        cmn_ip = C.intersection(P)
+        if cmn_ip:
+            # New added port
+            for ip in cmn_ip:
+                for port in current_result[ip]:
+                    if port not in previous_result[ip]:
+                        print('new port')
+                        print(ip)
+                        print(f"+ {port} open")
+            # Removed port
+            for ip in cmn_ip:
+                for port in previous_result[ip]:
+                    if port not in current_result[ip]:
+                        print(ip)
+                        print(f"- {port} open")
+    return()
+
+# Function to validate IP adress and IP networks
+def validate_ip(input):
+    try:
+        ipaddress.ip_network(input)
+        return True
+    except ValueError:
+        try:
+            ipaddress.ip_address(input)
+            return True
+        except ValueError:
+            print("""======================================================================================
+Please enter valid IP address or IP network range. eg: 192.168.0.123 or 192.168.0.0/24
+======================================================================================""")
+            exit()
+def main():
+    # Recieve IP address/range
+    network = sys.argv[1]
+    # Input validation
+    validate_ip(network)
+    # Perform new scan
+    current_result = ip_port_info(network)
+    # Compare with previous scan    
+    compare_results(current_result)
+    # Write scan result for next scan
+    with open(filename, 'w') as file:
+        json.dump(current_result, file)
+
+if __name__ == '__main__':
+    main()
